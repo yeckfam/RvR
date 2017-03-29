@@ -30,10 +30,10 @@ port = "3001"
 
 #Constants
 IPERF_OUTPUT_FORMAT = ".json"
-DEFAULT_IPERF_TEST_DURATION_SECONDS = '10'
-DEFAULT_PARALLEL_IPERF_STREAMS = '4'
+DEFAULT_IPERF_TEST_DURATION_SECONDS = '20'
+DEFAULT_PARALLEL_IPERF_STREAMS = '6'
 DEFAULT_SERVER_PORT = '5201'
-BASE_DIRECTORY = '/Users/fan/Desktop/rvr_test/'
+BASE_DIRECTORY = '/Users/eero/Desktop/rvr_test/'
 
 #TODO
 # make it simplier to read csv, have forward/reverse 
@@ -204,12 +204,7 @@ if __name__ == "__main__":
 						'--json',  
 						help="output in JSON format",
 						action='store_true')
-	
-	parser.add_argument('-V', 
-						'--verbose',  
-						help="More detailed output than before",
-						default=True,
-						action='store_true')						
+							
 	
 	parser.add_argument('-Z', 
 						'--zerocopy',  
@@ -327,13 +322,13 @@ if __name__ == "__main__":
 		attenuation_str = 'Attenuation ' + str(attenuation) + '\r\n'
 		print attenuation_str
 		
-		set attenuations on ADUSB4A
+		#set attenuations on ADUSB4A
 		devs = find_multiple_ADUSB4()
   		print devs
-  		att1 = ADUSB4A(devs[0])
-  		att1.set_all_ports(attenuation)  
-  		#att2 = ADUSB4A(devs[1])
-  		#att2.set_all_ports(attenuation)		
+  		#att1 = ADUSB4A(devs[0])
+  		#att1.set_all_ports(attenuation)  
+  		att2 = ADUSB4A(devs[1])
+  		att2.set_all_ports(attenuation)		
 		#tn.write(attenuation_str)
 		time.sleep(1)
 		
@@ -361,7 +356,7 @@ if __name__ == "__main__":
 			files_list.append(logfile_name)
 			
 			#read in file and add direction and attenuation
-			data_file = open(logfile_name, 'r+')   
+			data_file = open(logfile_name, 'r+')
 			data = json.load(data_file)
 			data['direction'] = direction # add direction
 			data['attenuation'] = str(attenuation)
@@ -379,8 +374,8 @@ if __name__ == "__main__":
 	#set attenuators back to 0	
 	#for attenuator in attenuators:		
 	#	attenuator.set_attenuation("0")
-	att1.set_all_ports(0)
-	#att2.set_all_ports(0)
+	#att1.set_all_ports(0)
+	att2.set_all_ports(0)
 		
 	#aggregate the files		
 	json_files = aggregate_files(files_list)
