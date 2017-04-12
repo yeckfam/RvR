@@ -6,3 +6,6 @@ RvR throughput measurement
 3. Results are generated in csv and json format.
 
 iperf_test.py needs to be run using sudo.
+
+Sample usage:
+sudo python iperf_test.py -c 192.168.1.161 -a 0 63 2 --logfile test-run
