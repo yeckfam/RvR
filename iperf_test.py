@@ -6,6 +6,9 @@ import pandas as pd
 from attenuators import *
 from adaura import *
 import pyping
+import paramiko
+import re
+import csv
 
 '''
 Run an iperf test over attenuation levels and save to csv for plotting.
@@ -24,23 +27,30 @@ Optional:
 - output file
 
 '''
+
+##Keep an active ping going#######
+##################################
+
+
 #JFW IP address and telnet port
 host = "10.10.4.36"
 port = "3001"
 
+#SSH client IP address
+client1 = "192.168.100.5"
+client2 = "192.168.100.6"
+
 #Constants
 IPERF_OUTPUT_FORMAT = ".json"
-DEFAULT_IPERF_TEST_DURATION_SECONDS = '20'
+DEFAULT_IPERF_TEST_DURATION_SECONDS = '10'
 DEFAULT_PARALLEL_IPERF_STREAMS = '6'
 DEFAULT_SERVER_PORT = '5201'
-BASE_DIRECTORY = '/Users/eero/Desktop/rvr_test/'
+BASE_DIRECTORY = '/Users/fan/Desktop/rvr_test/'
 
 #TODO
-# make it simplier to read csv, have forward/reverse 
-# remove commands/options that false
-# save tags to file
-# use python logging module
-# add check ping function to stop test
+# a better way to choose adura attenuator
+# add timeout to stop test
+
 
 def generate_attenuation_settings(atten_list):
 	'''Takes in a list of three values to generate values: start, stop, step.  
@@ -71,6 +81,21 @@ def build_iperf_command(input_dict, logfile):
 			
 	command = " ".join(list_of_commands)
 	return command
+	
+def get_rssi(client_IP):
+	ssh = paramiko.SSHClient()
+	ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+	ssh.connect(client_IP, username='admin', 
+    	password='saarinen')
+	stdin, stdout, stderr = ssh.exec_command(
+    	"./wl status")
+	stdin.flush()
+	data = stdout.readlines()
+	m=re.search('.*RSSI: (-\d+).*',data[1])
+	RSSI=m.group(1)
+	ssh.close()
+	return RSSI
 
 def save_average_data(input_data_list, output_file_name):
 	df = pd.DataFrame()
@@ -93,53 +118,26 @@ def save_average_data(input_data_list, output_file_name):
 		
 	csv_file_name = output_file_name + '_average.csv'
 	df.to_csv(csv_file_name, index=False)
-
-
-def save_interval_data(input_data_list, output_file_name):	
-	df = pd.DataFrame()
-	for input_data in input_data_list:	
-		try:
-			direction = input_data["direction"]
-			attenuation = input_data["attenuation"]
-			intervals = input_data["intervals"]
-			interval_number = 0
-			for interval in intervals:
-				output_dict = {}
-				interval_number += 1
-				output_dict["direction"] = direction
-				output_dict["attenuation"] = attenuation
-				output_dict["interval"] = interval_number
-				output_dict["start"] = interval["sum"]["start"]
-				output_dict["end"] = interval["sum"]["end"]
-				output_dict["seconds"] = interval["sum"]["seconds"]
-				output_dict["bytes"] = interval["sum"]["bytes"]
-				output_dict["mbits_per_second"] = float(interval["sum"]["bits_per_second"])/1000000
-				df = df.append(output_dict, ignore_index=True)
-		except:
-			pass
-	csv_file_name = output_file_name + '_intervals.csv'
-	df.to_csv(csv_file_name, index=False)
-
-def _save_average_data(input_data_list, output_file_name):
+	
+def save_average_data_simple(input_data_list, output_file_name):
 	df = pd.DataFrame()
 	for input_data in input_data_list:
 		try:
 			output_dict = {}
+			output_dict["direction"] = input_data["direction"]
 			output_dict["attenuation"] = input_data["attenuation"]
-			direction = input_data["direction"]
-			output_dict[(str(direction) + "_bits_per_second")] = float(input_data["end"]["sum_received"]["bits_per_second"])/1000000
-			output_df = pd.DataFrame(output_dict)
-			df = pd.merge(df, output_df)
+			output_dict["received_mbits_per_second"] = float(input_data["end"]["sum_received"]["bits_per_second"])/1000000
+			df = df.append(output_dict, ignore_index=True)
 		except:
 			print 'Failed to aggregate data:'
 			print str(input_data)
 			pass	
-			
+		
 	csv_file_name = output_file_name + '_average.csv'
 	df.to_csv(csv_file_name, index=False)
 
-	
-def _save_interval_data(input_data_list, output_file_name):	
+
+def save_interval_data(input_data_list, output_file_name):	
 	df = pd.DataFrame()
 	for input_data in input_data_list:	
 		try:
@@ -204,6 +202,12 @@ if __name__ == "__main__":
 						'--json',  
 						help="output in JSON format",
 						action='store_true')
+						
+	parser.add_argument('-O', 
+						'--omit',  
+						help="omit the first n seconds", 
+						nargs=1,
+						default=['5']) 
 							
 	
 	parser.add_argument('-Z', 
@@ -220,9 +224,9 @@ if __name__ == "__main__":
 						
 	parser.add_argument('-c', 
 						'--client',  
-						help="IP Address of client",
+						help="Client test IP address",
 						nargs=1,
-						required=True) 
+						required=True)
 	
 	parser.add_argument('-p', 
 						'--port',  
@@ -235,10 +239,6 @@ if __name__ == "__main__":
 						nargs=1,
 						default=[None]
 						) 
-	
-	parser.add_argument('--tags',  
-						help="Tags to add", 
-						nargs='+') 
 	
 	parser.add_argument('-a',
 						'--attenuation',
@@ -303,9 +303,6 @@ if __name__ == "__main__":
 	#	attenuator.check_attenuation_values(attenuation_settings)
 	#print 'Attenuation settings are valid.'
 	
-	#remove tags 
-	tags = args_dict['tags']
-	del args_dict['tags']
 	
 	#get the test time
 	test_time = args_dict['time'][0]
@@ -314,6 +311,13 @@ if __name__ == "__main__":
 	iperf_command = build_iperf_command(args_dict, file_name)
 
 	files_list = []
+	
+	#Get client IP address
+	client_IP = args_dict['client'][0]
+	
+	#Create RSSI dictionary
+	RSSIlist = []
+	
 
 	#tn = telnetlib.Telnet(host,port)
 	for attenuation in attenuation_settings:
@@ -321,6 +325,15 @@ if __name__ == "__main__":
 		#attenuation_str = 'SA ' + str(p) + ' ' + str(attenuation) + '\r\n'
 		attenuation_str = 'Attenuation ' + str(attenuation) + '\r\n'
 		print attenuation_str
+		
+		
+		
+		######################################################################
+		######################################################################
+		######################################################################
+		######################################################################
+		
+		#Change this before each test
 		
 		#set attenuations on ADUSB4A
 		devs = find_multiple_ADUSB4()
@@ -330,11 +343,16 @@ if __name__ == "__main__":
   		att2 = ADUSB4A(devs[1])
   		att2.set_all_ports(attenuation)		
 		#tn.write(attenuation_str)
-		time.sleep(1)
+		time.sleep(3)
+		
+		######################################################################
+		######################################################################
+		######################################################################
+		######################################################################
 		
 		##############
 		#add check ping function here
-		response = pyping.ping(args_dict['client'][0])
+		response = pyping.ping(client_IP)
 		
 		if not response.ret_code == 0:
 			print 'Client Disconnected!!!'
@@ -370,20 +388,53 @@ if __name__ == "__main__":
 			json_string = json.dumps(data, indent=2)
 			data_file.write(json_string)
 			data_file.close()
+			
+			
+		######################################################################
+		######################################################################
+		######################################################################
+		######################################################################
+		
+			#Change this before each test
+			
+			#Log RSSI from client
+			RSSI = get_rssi(client2)
+			print 'RSSI: ' + RSSI
+			RSSIlist.append(RSSI)
+		######################################################################
+		######################################################################
+		######################################################################
+		######################################################################
 		
 	#set attenuators back to 0	
 	#for attenuator in attenuators:		
 	#	attenuator.set_attenuation("0")
 	#att1.set_all_ports(0)
-	att2.set_all_ports(0)
+	#att2.set_all_ports(0)
 		
 	#aggregate the files		
 	json_files = aggregate_files(files_list)
 					
 	#save average data to CSV file
-	save_average_data(json_files, full_file_name)
+	#save_average_data(json_files, full_file_name)
+	save_average_data_simple(json_files, full_file_name)
+
 	
 	#save interval data to CSV file
 	save_interval_data(json_files, full_file_name)
+	
+	#Save RSSI results into another csv file	
+	f = open(full_file_name + '_average.csv')
+	outf = open(full_file_name + '_average_rssi.csv','wb')
+	r = csv.reader(f)
+	row0 = r.next()
+	row0.append('RSSI')
+	all_rows = [row0]
+	for row in r:
+		row.append(RSSIlist.pop(0))
+		all_rows.append(row)
+	w = csv.writer(outf)
+	w.writerows(all_rows)
+	
 
 	print "\n\n------------ Test Finished ------------\n\n"
